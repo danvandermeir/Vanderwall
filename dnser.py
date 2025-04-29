@@ -268,3 +268,6 @@ def main():
                 daemonize_process(verify_and_update_dns, args=(token, zoneids[index], wilddomainids[index], domain, recordtypes[index], contents[index], continuous[index]))
             elif verify_and_update_dns(token, zoneids[index], wilddomainids[index], domain, recordtypes[index], contents[index], continuous[index])):
                 print(f"Updated wildcard for domain (*.{domain}) successfully!")
+
+if __name__ == "__main__":
+    main()
