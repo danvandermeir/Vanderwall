@@ -204,7 +204,7 @@ def verify_and_update_dns(token, zoneid, domainid, domain, recordtype, content='
         print(f"Function \'verify_and_update_dns\' provided bad record type ({recordtype})! Must be \'A\' or \'TXT\'! Can not continue!")
         return False
 
-def main()
+def main():
     if sys.argv[0]:
         del token, domains, recordtypes, contents, continuous
         if sys.argv[0] == '-c':
