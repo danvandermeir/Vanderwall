@@ -7,11 +7,19 @@ import string
 import requests
 import dns.resolver
 
+# If script is called you can add arguements to overide below variables in the order
+# ./dnser.py <API TOKEN> <DOMAIN RECORD> <RECORD TYPE> <RECORD CONTENT> <CONTINUOUS RUN>
+
+#CloudFlare API token
 token = ""
+# subdomains allowed, record must already exist with CloudFlare
 domains = ["", "", ""]
+# TXT or A records allowed, if "none" matching domains element and a wildcard of it attempted as A type for matching contents element
 recordtypes = ["", "", ""]
+# if empty and matching recordtypes element is type A WAN IP will be discovered and used
 contents = ["", "", ""]
-continuous = ["", "", ""]
+# True or False (or empty) to run check forever as background process per domains element
+continuous = [False, False, False]
 
 def daemonize_process(target, args=()):
     if os.name == 'posix':
@@ -217,10 +225,7 @@ def main():
             elif not domains[0]:
                 domains[0] = arguement
             elif not recordtypes[0]:
-                if arguement.lower() == 'none':
-                    recordtypes[0] = ''
-                else:
-                    recordtypes[0] = arguement
+                recordtypes[0] = arguement
             elif not contents[0]:
                 contents[0] = arguement
             elif not continuous[0]:
@@ -239,7 +244,7 @@ def main():
             continuous[index] = True
         else:
             continuous[index] = False
-        if not recordtypes[index]:
+        if not recordtypes[index] or recordtypes[index].lower() == 'none':
             recordtypes[index] = 'A'
             emptyrecords[index] = True
         else:
