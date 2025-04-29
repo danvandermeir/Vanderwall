@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-import requests
-import struct
-import dns.resolver
-import json
-import time
 import os
 import sys
+import json
+import time
+import string
+import requests
+import dns.resolver
 
 token = ""
-domains = ["", "", "", ""]
+domains = ["", "", ""]
+recordtypes = ["", "", ""]
+contents = ["", "", ""]
+continuous = ["", "", ""]
 
 def daemonize_process(target, args=()):
     if os.name == 'posix':
@@ -34,16 +37,59 @@ def is_ipv4(ipinput):
             return False
     return True
 
-def dnsgetip(dnsreq, dnsserver):
+def dnsgetrecord(record, type, dnsserver):
     try:
         dnsans = dns.resolver.Resolver(configure=False)
         dnsans.nameservers = [dnsserver]
-        answers = dnsans.resolve(dnsreq, 'A')
+        answers = dnsans.resolve(record, type)
         return answers[0].to_text()
     except dns.exception.DNSException:
         return ""
 
-def getzoneid(domain, token):
+def getipof(domainrequest, dnsserverips):
+    if not dnsserverips:
+        print(f"Function getipof not passed DNS server IPs ({dnsserverips})!")
+    returnip = ''
+    while True:
+        for dnsserverip in dnsserverips:
+            if not is_ipv4(dnsserverip):
+                print(f"Function getipof passed bad DNS server IP ({dnsserverip})!")
+                continue
+            returnip = dnsgetrecord(domainrequest, 'A', dnsserverip)
+            if is_ipv4(returnip):
+                break
+            else:
+                returnip = ''
+        if not returnip:
+            time.sleep(10)
+        else:
+            break
+    return returnip
+
+def getwanip(dnsserverips):
+    if not dnsserverips:
+        print(f"Function getwanip not passed DNS server IPs ({dnsserverips})!")
+    returnip = ''
+    while True:
+        for dnsserverip in dnsserverips:
+            if not is_ipv4(dnsserverip):
+                print(f"Function getwanip passed bad DNS server IP ({dnsserverip})!")
+                continue
+            opendnsserverip = dnsgetrecord("resolver1.opendns.com", 'A', dnsserverip)
+            if not is_ipv4(opendnsserverip):
+                continue
+            returnip = dnsgetrecord("myip.opendns.com", 'A', opendnsserverip)
+            if is_ipv4(returnip):
+                break
+            else:
+                returnip = ''
+        if not returnip:
+            time.sleep(10)
+        else:
+            break
+    return returnip
+
+def getzoneid(token, domain):
     url = f"https://api.cloudflare.com/client/v4/zones?name={domain}"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -63,7 +109,7 @@ def getzoneid(domain, token):
     else:
         return ""
 
-def getdomainid(domain, recordtype, zoneid, token):
+def getdomainid(token, zoneid, domain, recordtype):
     url = f"https://api.cloudflare.com/client/v4/zones/{zoneid}/dns_records"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -83,16 +129,16 @@ def getdomainid(domain, recordtype, zoneid, token):
     else:
         return ""
 
-def updatednsrecord(domain, domaintype, zoneid, domainid, wanip, token):
+def updatednsrecord(token, zoneid, domainid, domain, recordtype, content):
     url = f"https://api.cloudflare.com/client/v4/zones/{zoneid}/dns_records/{domainid}"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
     data = {
-        "type": domaintype,
+        "type": recordtype,
         "name": domain,
-        "content": wanip,
+        "content": content,
         "ttl": 1,
         "proxied": False,
     }
@@ -101,48 +147,119 @@ def updatednsrecord(domain, domaintype, zoneid, domainid, wanip, token):
         return False
     return True
 
-def checkdnsagainstwanip(domain, zoneid, domainid, token):
-    opendnsserverip = ""
-    while True:
-        if not is_ipv4(opendnsserverip):
-            for index, dnsip in enumerate(dnsserverips):
-                opendnsserverip = dnsgetip("resolver1.opendns.com", dnsip)
-                if is_ipv4(opendnsserverip):
-                    break
-        wanip = dnsgetip("myip.opendns.com", opendnsserverip)
-        if not is_ipv4(wanip):
-            opendnsserverip = ""
-            time.sleep(10)
-            continue
-        domainip = dnsgetip(domain, opendnsserverip)
-        if not is_ipv4(domainip):
-            opendnsserverip = ""
-            time.sleep(10)
-            continue
-        waittime = 300
-        if wanip != domainip:
-            print(f"domainip != wanip ({domain})")
-            if not updatednsrecord(domain, "A", zoneid, domainid, wanip, token):
-                waittime = 10
-        time.sleep(waittime)
-
-dnsserverips = ["1.1.1.1", "8.8.8.8", "1.2.3.4"]
-zoneids = [""] * len(domains)
-rootdomainids = [""] * len(domains)
-wilddomainids = [""] * len(domains)
-
-for index, domain in enumerate(domains):
-    zoneids[index] = getzoneid(domain, token)
-    if not zoneids[index]:
-        print(f"Could not get zone ID for domain ({domain})! Check CloudFlare, will not update!")
-        continue
-    rootdomainids[index] = getdomainid(domain, "A", zoneids[index], token)
-    if not rootdomainids[index]:
-        print(f"Root domain ({domain}) domain ID could not be found! Check CloudFlare, will not update!")
+def verify_and_update_dns(token, zoneid, domainid, domain, recordtype, content='', runloop=False):
+    if any(x in (None, "") for x in (token, zoneid, domainid, domain, recordtype)):
+        print(f"Function \'verify_and_update_dns\' was called improperly ({token}, {zoneid}, {domainid}, {domain}, {recordtype})!")
+        return False
+    if runloop:
+        runonce = False
+    else
+        runonce = True
+    if recordtype.lower() == 'a':
+        if not content:
+            while runloop or runonce:
+                wanip = getwanip(dnsserverips)
+                domainip = getipof(domain, dnsserverips)
+                if wanip == domainip:
+                    waittime = 300
+                else:
+                    print(f"Domain ({domain}) IP ({domainip}) is not WAN IP ({wanip})! Updating!")
+                    while not updatednsrecord(token, zoneid, domainid, domain, recordtype, wanip):
+                        waittime = 10
+                if runonce:
+                    return True
+                time.sleep(waittime)
+        elif is_ipv4(content):
+            while runloop or runonce:
+                domainip = getipof(domain, dnsserverips)
+                if content == domainip:
+                    waittime = 300
+                else:
+                    print(f"Domain ({domain}) IP ({domainip}) is not requested content ({content})! Updating!")
+                    while not updatednsrecord(token, zoneid, domainid, domain, recordtype, content):
+                        waittime = 10
+                if runonce:
+                    return True
+                time.sleep(waittime)
+        else:
+            print(f"Function \'verify_and_update_dns\' provided \'A\' recordtype and bad IP ({content}! Can not continue!")
+            return False
+    elif recordtype.lower() == 'txt':
+        content = content.replace('"', r'\"')
+        if len(content) > 255 or not all(char in string.printable for char in content):
+            print(f"Function \'verify_and_update_dns\' provided \'TXT\' recordtype and bad content ({content})! Quotes are escaped, verify length! String must conform to ASCII characters with total length less than 255 characters! Can not continue!")
+            return False
+        while runloop or runonce:
+            domainstring = dnsgetrecord(domain, 'TXT', dnsserverips)
+            if content == domainstring:
+                waittime = 300
+            else:
+                print(f"Domain ({domain}) string ({domainstring}) is not requested content ({content})! Updating!")
+                while not updatednsrecord(token, zoneid, domainid, domain, recordtype, domainstring):
+                    waittime = 10
+            if runonce:
+                return True
+            time.sleep(waittime)
     else:
-        daemonize_process(checkdnsagainstwanip, args=(domain, zoneids[index], rootdomainids[index], token))
-    wilddomainids[index] = getdomainid(f"*.{domain}", "A", zoneids[index], token)
-    if not wilddomainids[index]:
-        print(f"Wildcard for domain (*.{domain}) domain ID could not be found! Check CloudFlare, will not update!")
-    else:
-        daemonize_process(checkdnsagainstwanip, args=(f"*.{domain}", zoneids[index], rootdomainids[index], token))
+        print(f"Function \'verify_and_update_dns\' provided bad record type ({recordtype})! Must be \'A\' or \'TXT\'! Can not continue!")
+        return False
+
+def main()
+    if sys.argv[0]:
+        del token, domains, recordtypes, contents, continuous
+        if sys.argv[0] == '-c':
+            indexstart = 2
+        else:
+            indexstart = 1
+        for arguement in sys.argv[indexstart:]:
+            if not token:
+                token = arguement
+            elif not domains[0]:
+                domains[0] = arguement
+            elif not recordtypes[0]:
+                if arguement.lower() == 'none':
+                    recordtypes[0] = ''
+                else:
+                    recordtypes[0] = arguement
+            elif not contents[0]:
+                contents[0] = arguement
+            elif not continuous[0]:
+                continuous[0] = arguement
+                break
+    if not token:
+        print("No token provided! Can not continue!")
+        sys.exit()
+    dnsserverips = ["1.1.1.1", "8.8.8.8", "1.2.3.4"]
+    zoneids = [""] * len(domains)
+    domainids = [""] * len(domains)
+    emptyrecords = [""] * len(domains)
+    wilddomainids = [""] * len(domains)
+    for index, domain in enumerate(domains):
+        if continuous[index]:
+            continuous[index] = True
+        else:
+            continuous[index] = False
+        if not recordtypes[index]:
+            recordtypes[index] = 'A'
+            emptyrecords[index] = True
+        else:
+            emptyrecords[index] = False
+        zoneids[index] = getzoneid(domain, token)
+        if not zoneids[index]:
+            print(f"Could not get zone ID for domain ({domain})! Check CloudFlare to ensure record exists, will not update!")
+            continue
+        domainids[index] = getdomainid(token, zoneids[index], domain, recordtypes[index])
+        if not domainids[index]:
+            print(f"Domain ({domain}) domain ID could not be found! Check CloudFlare to ensure record exists, will not update!")
+        elif continuous[index]:
+            daemonize_process(verify_and_update_dns, args=(token, zoneids[index], domainids[index], domain, recordtypes[index], contents[index], continuous[index]))
+        elif verify_and_update_dns(token, zoneids[index], domainids[index], domain, recordtypes[index], contents[index], continuous[index])):
+            print(f"Updated domain ({domain}) successfully!")
+        if emptyrecords[index]:
+            wilddomainids[index] = getdomainid(token, zoneids[index], f"*.{domain}", recordtypes[index])
+            if not wilddomainids[index]:
+                print(f"Wildcard for domain (*.{domain}) domain ID could not be found! Check CloudFlare to ensure record exists, will not update!")
+            elif continuous[index]:
+                daemonize_process(verify_and_update_dns, args=(token, zoneids[index], wilddomainids[index], domain, recordtypes[index], contents[index], continuous[index]))
+            elif verify_and_update_dns(token, zoneids[index], wilddomainids[index], domain, recordtypes[index], contents[index], continuous[index])):
+                print(f"Updated wildcard for domain (*.{domain}) successfully!")
