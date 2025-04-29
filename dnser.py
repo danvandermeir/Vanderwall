@@ -161,7 +161,7 @@ def verify_and_update_dns(token, zoneid, domainid, domain, recordtype, content='
         return False
     if runloop:
         runonce = False
-    else
+    else:
         runonce = True
     if recordtype.lower() == 'a':
         if not content:
